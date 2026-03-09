@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 WEBHOOK = os.environ["DISCORD_WEBHOOK"]
@@ -13,29 +14,29 @@ HEADERS = {
 
 sites = [
 
- {"name":"クーリア①","url":"https://qlia.shop/?pid=187368266","type":"qlia"},
- {"name":"クーリア②","url":"https://qlia.shop/?pid=187368269","type":"qlia"},
- {"name":"クーリア③","url":"https://qlia.shop/?pid=187368267","type":"qlia"},
- {"name":"クーリア④","url":"https://qlia.shop/?pid=187368265","type":"qlia"},
- {"name":"クーリア⑤","url":"https://qlia.shop/?pid=185299628","type":"qlia"},
- {"name":"クーリア⑥","url":"https://qlia.shop/?pid=185299615","type":"qlia"},
- {"name":"クーリア⑦","url":"https://qlia.shop/?pid=187918895","type":"qlia"},
- {"name":"クーリア⑧","url":"https://qlia.shop/?pid=186116749","type":"qlia"},
- {"name":"クーリア⑨","url":"https://qlia.shop/?pid=187918894","type":"qlia"},
- {"name":"クーリア⑩","url":"https://qlia.shop/?pid=189151457","type":"qlia"},
- {"name":"クーリア⑪","url":"https://qlia.shop/?pid=189151455","type":"qlia"},
- {"name":"クーリア⑫","url":"https://qlia.shop/?pid=189151453","type":"qlia"},
- {"name":"クーリア⑬","url":"https://qlia.shop/?pid=189151447","type":"qlia"},
- {"name":"クーリア⑭","url":"https://qlia.shop/?pid=189151443","type":"qlia"},
- {"name":"クーリア⑮","url":"https://qlia.shop/?pid=189151445","type":"qlia"},
- {"name":"クーリア⑯","url":"https://qlia.shop/?pid=187918893","type":"qlia"},
- {"name":"クーリア⑰","url":"https://qlia.shop/?pid=187918892","type":"qlia"},
- {"name":"クーリア⑱","url":"https://qlia.shop/?pid=188589206","type":"qlia"},
- {"name":"クーリア⑲","url":"https://qlia.shop/?pid=188589205","type":"qlia"},
- {"name":"クーリア⑳","url":"https://qlia.shop/?pid=188589209","type":"qlia"},
- {"name":"クーリア㉑","url":"https://qlia.shop/?pid=187368262","type":"qlia"},
- {"name":"クーリア㉒","url":"https://qlia.shop/?pid=187368263","type":"qlia"},
- {"name":"クーリア㉓","url":"https://qlia.shop/?pid=187368257","type":"qlia"}
+ {"name":"クーリア①","url":"https://qlia.shop/?pid=187368266"},
+ {"name":"クーリア②","url":"https://qlia.shop/?pid=187368269"},
+ {"name":"クーリア③","url":"https://qlia.shop/?pid=187368267"},
+ {"name":"クーリア④","url":"https://qlia.shop/?pid=187368265"},
+ {"name":"クーリア⑤","url":"https://qlia.shop/?pid=185299628"},
+ {"name":"クーリア⑥","url":"https://qlia.shop/?pid=185299615"},
+ {"name":"クーリア⑦","url":"https://qlia.shop/?pid=187918895"},
+ {"name":"クーリア⑧","url":"https://qlia.shop/?pid=186116749"},
+ {"name":"クーリア⑨","url":"https://qlia.shop/?pid=187918894"},
+ {"name":"クーリア⑩","url":"https://qlia.shop/?pid=189151457"},
+ {"name":"クーリア⑪","url":"https://qlia.shop/?pid=189151455"},
+ {"name":"クーリア⑫","url":"https://qlia.shop/?pid=189151453"},
+ {"name":"クーリア⑬","url":"https://qlia.shop/?pid=189151447"},
+ {"name":"クーリア⑭","url":"https://qlia.shop/?pid=189151443"},
+ {"name":"クーリア⑮","url":"https://qlia.shop/?pid=189151445"},
+ {"name":"クーリア⑯","url":"https://qlia.shop/?pid=187918893"},
+ {"name":"クーリア⑰","url":"https://qlia.shop/?pid=187918892"},
+ {"name":"クーリア⑱","url":"https://qlia.shop/?pid=188589206"},
+ {"name":"クーリア⑲","url":"https://qlia.shop/?pid=188589205"},
+ {"name":"クーリア⑳","url":"https://qlia.shop/?pid=188589209"},
+ {"name":"クーリア㉑","url":"https://qlia.shop/?pid=187368262"},
+ {"name":"クーリア㉒","url":"https://qlia.shop/?pid=187368263"},
+ {"name":"クーリア㉓","url":"https://qlia.shop/?pid=187368257"}
 
 ]
 
@@ -52,23 +53,24 @@ notify=[]
 
 def check(site):
 
-    for _ in range(2):  # 2回試す
-        try:
+    try:
 
-            r=requests.get(site["url"],headers=HEADERS,timeout=15)
-            html=r.text
+        r=requests.get(site["url"],headers=HEADERS,timeout=15)
+        html=r.text
 
-            available=False
+        # ページ変化検知
+        page_hash=hashlib.md5(html.encode()).hexdigest()
 
-            if "SOLD OUT" not in html:
-                available=True
+        available=False
 
-            return site,available
+        if "SOLD OUT" not in html:
+            available=True
 
-        except:
-            continue
+        return site,available,page_hash
 
-    return site,False
+    except:
+
+        return site,False,None
 
 
 with ThreadPoolExecutor(max_workers=23) as executor:
@@ -76,20 +78,37 @@ with ThreadPoolExecutor(max_workers=23) as executor:
     results=list(executor.map(check,sites))
 
 
-for site,available in results:
+for site,available,page_hash in results:
 
-    new_state[site["url"]]=available
+    last=last_state.get(site["url"],{})
 
-    if available and not last_state.get(site["url"],False):
+    new_state[site["url"]] = {
+        "available":available,
+        "hash":page_hash
+    }
 
-        notify.append(site)
+    # 在庫復活
+    if available and not last.get("available",False):
+
+        notify.append(("stock",site))
+
+    # ページ更新
+    elif page_hash and page_hash != last.get("hash"):
+
+        notify.append(("update",site))
 
 
 if notify:
 
-    msg="🔥在庫復活🔥\n\n"
+    msg="🚨ページ変化または在庫復活🚨\n\n"
 
-    for n in notify:
+    for t,n in notify:
+
+        if t=="stock":
+            msg+="🔥在庫復活\n"
+
+        else:
+            msg+="🔄ページ更新\n"
 
         msg+=f"{n['name']}\n{n['url']}\n\n"
 
